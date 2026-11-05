@@ -1,0 +1,32 @@
+# Build outputs
+/build*/
+/cmake-build-*/
+/out/
+*.o
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+compile_commands.json
+
+# Local IDE settings
+.vs/
+.vscode/
+.idea/
+
+# Generated datasets and benchmark outputs
+/data/*.csv
+!/data/sample_trades.csv
+/results/*
+!/results/README.md
+
+# OS/editor temporary files
+.DS_Store
+Thumbs.db
+*~
+*.swp
