@@ -1,5 +1,14 @@
 #include "minidb/Cli.h"
+#include <exception>
+#include <iostream>
 
-// TODO: Define int main() after implementing Database and Cli.
-// Construct Database, construct Cli with std::cin/std::cout, then return cli.run().
-// The scaffold build intentionally does not create an executable yet.
+int main() {
+    try {
+        minidb::Database database;
+        minidb::Cli cli(database, std::cin, std::cout);
+        return cli.run();
+    } catch (const std::exception& error) {
+        std::cerr << "Fatal error: " << error.what() << '\n';
+        return 1;
+    }
+}
