@@ -5,10 +5,6 @@ a custom separate-chaining hash table with a custom B+ tree for building an
 index, inserting trades, and looking up exact trade IDs. The database stores
 each record once and updates both indexes on insertion.
 
-> The build and run steps below apply to the completed implementation. This
-> branch still contains a placeholder in `src/HashIndex.cpp`, so the CLI build
-> requires the completed source.
-
 ## Build and run
 
 Use a C++17 compiler and CMake 3.16 or newer. On Windows, open a terminal where
