@@ -42,7 +42,7 @@ namespace minidb
         if (it != leaf->keys.end() && *it == key)
         {
             std::size_t idx = static_cast<std::size_t>(std::distance(leaf->keys.begin(), it));
-            return leaf->keys[idx];
+            return leaf->rows[idx];
         }
         return std::nullopt;
     }
