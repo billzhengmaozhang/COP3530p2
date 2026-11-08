@@ -1,4 +1,5 @@
 #include "minidb/Benchmark.h"
+#include "minidb/Benchmark.h"
 #include "minidb/BPlusTreeIndex.h"
 #include "minidb/HashIndex.h"
 #include "minidb/Error.h"
@@ -7,12 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
-#include <locale>
-#include <map>
 #include <random>
-#include <sstream>
-#include <tuple>
 
 namespace minidb
 {
@@ -52,35 +48,6 @@ namespace minidb
                 throw MiniDBError(ErrorCode::InvalidRecord, "Index structural validation failed after benchmark trial.");
             }
         }
-
-        const char* orderName(InsertionOrder order) {
-            return order == InsertionOrder::Sequential ? "sequential" : "shuffled";
-        }
-
-        const char* indexName(IndexKind index) {
-            return index == IndexKind::Hash ? "hash" : "bplus";
-        }
-
-        const char* workloadName(Workload workload) {
-            switch (workload) {
-                case Workload::Build: return "build";
-                case Workload::Insert: return "insert";
-                case Workload::FindExisting: return "find_existing";
-                case Workload::FindMissing: return "find_missing";
-            }
-            throw std::logic_error("Unknown benchmark workload.");
-        }
-
-        void writeCsvText(std::ostream& output, const std::string& text) {
-            output << '"';
-            for (char ch : text) {
-                if (ch == '"') {
-                    output << '"';
-                }
-                output << ch;
-            }
-            output << '"';
-        }
         } // namespace
 
         std::unique_ptr<IIndex> Benchmark::makeIndex(IndexKind kind, const IndexConfig& config) const {
@@ -105,10 +72,6 @@ namespace minidb
             TradeId max_id = 0;
             for (const auto& r : records) {
                 max_id = std::max(max_id, r.trade_id);
-            }
-            if (count > std::numeric_limits<TradeId>::max() - max_id ||
-                count > std::numeric_limits<RowId>::max() - records.size()) {
-                throw MiniDBError(ErrorCode::InvalidConfiguration, "Benchmark insertion range would overflow.");
             }
             std::vector<IndexEntry> additions;
             additions.reserve(count);
@@ -143,12 +106,9 @@ namespace minidb
                 for (const auto& r : records) {
                     max_id = std::max(max_id, r.trade_id);
                 }
-                const auto additions = std::max<std::size_t>(1, records.size() / 10);
-                const auto last_id = std::numeric_limits<TradeId>::max();
-                if (additions >= last_id - max_id) {
-                    throw MiniDBError(ErrorCode::InvalidConfiguration, "Benchmark has no disjoint missing-ID range.");
-                }
-                std::uniform_int_distribution<TradeId> dist(max_id + additions + 1, last_id);
+                // Disjoint absent-ID range well above initial + addition ranges
+                TradeId absent_base = max_id + records.size() + 1000000ULL;
+                std::uniform_int_distribution<TradeId> dist(absent_base, absent_base + count * 10ULL);
                 for (std::size_t i = 0; i < count; ++i) {
                     batch.keys.push_back(dist(rng));
                     batch.expected.push_back(std::nullopt);
@@ -307,10 +267,6 @@ namespace minidb
         {
             BenchmarkReport report{config, {}};
             if (records.empty()) return report;
-            if (config.lookup_count == 0 || config.measured_trials == 0 ||
-                config.warmup_trials > std::numeric_limits<std::size_t>::max() - config.measured_trials) {
-                throw MiniDBError(ErrorCode::InvalidConfiguration, "Invalid benchmark trial or lookup count.");
-            }
 
             auto entries = makeEntries(records);
             std::size_t add_count = std::max<std::size_t>(1, records.size() / 10); // m = max(1, n/10) per Design Doc
@@ -371,60 +327,6 @@ namespace minidb
                 }
             }
             return full_report;
-        }
-
-        void Benchmark::printSummary(const BenchmarkReport& report, std::ostream& out) const {
-            using Group = std::tuple<std::size_t, InsertionOrder, IndexKind, Workload, std::size_t>;
-            std::map<Group, std::vector<std::int64_t>> groups;
-            for (const auto& result : report.trials) {
-                groups[{result.dataset_size, result.order, result.index, result.workload,
-                        result.operation_count}].push_back(result.elapsed_ns);
-            }
-            std::ostringstream summary;
-            summary.imbue(std::locale::classic());
-            summary << "Records  Order  Index  Workload  Median ms  ns/op  ops/s\n"
-                    << std::fixed << std::setprecision(2);
-            for (const auto& [group, times] : groups) {
-                const auto [size, order, index, workload, operations] = group;
-                const double elapsed = median(times);
-                summary << size << "  " << orderName(order) << "  " << indexName(index)
-                        << "  " << workloadName(workload) << "  " << elapsed / 1e6
-                        << "  " << elapsed / operations << "  ";
-                if (elapsed > 0) {
-                    summary << operations * 1e9 / elapsed;
-                } else {
-                    summary << "n/a";
-                }
-                summary << '\n';
-            }
-            out << summary.str();
-        }
-
-        void Benchmark::saveCsv(const BenchmarkReport& report, const std::string& path) const {
-            std::ofstream output(path, std::ios::binary);
-            if (!output) {
-                throw MiniDBError(ErrorCode::FileWrite, "Cannot open benchmark results: " + path);
-            }
-            output.imbue(std::locale::classic());
-            output << "dataset_size,order,seed,index,workload,trial,operation_count,elapsed_ns,"
-                      "checksum,bucket_count,max_children,compiler,optimization,machine\n";
-            for (const auto& result : report.trials) {
-                output << result.dataset_size << ',' << orderName(result.order) << ',' << result.seed
-                       << ',' << indexName(result.index) << ',' << workloadName(result.workload)
-                       << ',' << result.trial << ',' << result.operation_count << ',' << result.elapsed_ns
-                       << ',' << result.checksum << ',' << result.bucket_count << ',' << result.max_children
-                       << ',';
-                writeCsvText(output, report.config.compiler_description);
-                output << ',';
-                writeCsvText(output, report.config.optimization_flags);
-                output << ',';
-                writeCsvText(output, report.config.machine_description);
-                output << '\n';
-            }
-            output.close();
-            if (!output) {
-                throw MiniDBError(ErrorCode::FileWrite, "Could not finish writing benchmark results: " + path);
-            }
         }
 
 } // namespace minidb
