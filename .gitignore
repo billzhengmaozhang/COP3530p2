@@ -24,9 +24,11 @@ compile_commands.json
 !/data/sample_trades.csv
 /results/*
 !/results/README.md
+!/results/submission-benchmark.csv
 
 # OS/editor temporary files
 .DS_Store
 Thumbs.db
 *~
 *.swp
+
