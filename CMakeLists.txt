@@ -70,6 +70,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(minidb_tests PRIVATE minidb_lib Catch2::Catch2WithMain)
 
+    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
     include(Catch)
     catch_discover_tests(minidb_tests)
 endif()
