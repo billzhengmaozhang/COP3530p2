@@ -57,7 +57,8 @@ and accept the other defaults.
 The console shows median times for build, incremental insert, successful
 lookup, and missing lookup. The CSV at **results/benchmark.csv** contains
 individual measured trials. The menu also accepts a different output path
-whose parent directory already exists.
+whose parent directory already exists. The [archived benchmark results](results/README.md)
+include the raw trials used in the report.
 
 ## Run the tests
 
@@ -69,3 +70,4 @@ cmake -S . -B build-tests -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
 cmake --build build-tests --config Release
 ctest --test-dir build-tests -C Release --output-on-failure
 ~~~
+
