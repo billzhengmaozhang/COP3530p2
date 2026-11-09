@@ -1,8 +1,3 @@
-//
-// Created by Jacob on 11/8/2026.
-//
-
-
 #include <catch2/catch_test_macros.hpp>
 #include "minidb/BPlusTreeIndex.h"
 #include "minidb/Error.h"
