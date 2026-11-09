@@ -162,6 +162,11 @@ public:
     // nullopt means missing; RowId{0} is a valid match.
     virtual std::optional<RowId> find(TradeId key) const = 0;
     virtual std::size_t size() const = 0;
+    // Untimed structural self-check used by tests and the benchmark.
+    virtual bool validateStructure() const = 0;
+    // Capacity details recorded with benchmark trials; 0 when not applicable.
+    virtual std::size_t bucketCount() const { return 0; }
+    virtual std::size_t maxChildren() const { return 0; }
 };
 } // namespace minidb
 ```
@@ -207,10 +212,10 @@ public:
     InsertStatus insert(TradeId key, RowId row) override;
     std::optional<RowId> find(TradeId key) const override;
     std::size_t size() const override;
+    bool validateStructure() const override;
+    std::size_t bucketCount() const override;
 
-    std::size_t bucketCount() const;
     double loadFactor() const;
-    bool validateStructure() const;
 
 private:
     static std::uint64_t hashKey(TradeId key);
@@ -239,10 +244,10 @@ public:
     InsertStatus insert(TradeId key, RowId row) override;
     std::optional<RowId> find(TradeId key) const override;
     std::size_t size() const override;
+    bool validateStructure() const override;
+    std::size_t maxChildren() const override;
 
-    std::size_t maxChildren() const;
     std::size_t height() const;
-    bool validateStructure() const;
 
 private:
     struct Node {
@@ -369,6 +374,7 @@ struct DatasetConfig {
     std::uint64_t seed = 3530;
     InsertionOrder order = InsertionOrder::Sequential;
     TradeId first_id = 1; // Use a disjoint range for additional insertion records.
+    TradeId id_stride = 1; // Gap between consecutive IDs; 2 leaves absent IDs between stored keys.
 };
 
 class DatasetGenerator {
@@ -430,8 +436,11 @@ struct BenchmarkReport {
 
 class Benchmark {
 public:
-    // Generates required datasets; warmups excluded from returned results.
-    BenchmarkReport runSuite(const BenchmarkConfig& config) const;
+    // Generates required datasets (stride-2 IDs, so absent IDs lie between stored
+    // keys); warmups excluded from returned results. If progress is non-null, a
+    // line is written after each dataset finishes.
+    BenchmarkReport runSuite(const BenchmarkConfig& config,
+                             std::ostream* progress = nullptr) const;
     // Uses supplied records without modifying the active Database.
     BenchmarkReport run(const std::vector<TradeRecord>& records,
                          InsertionOrder order,
@@ -454,18 +463,22 @@ private:
     LookupBatch makeQueries(const std::vector<TradeRecord>& records,
                             std::size_t count, std::uint64_t seed,
                             bool successful) const;
-    // Each trial constructs fresh indexes and validates outside timed regions.
-    TrialResult timeBuild(IndexKind kind, const std::vector<IndexEntry>& entries,
+    // One trial per index: build (timed), then both lookup workloads on that
+    // index, then the incremental inserts (timed, mutates the index). All
+    // validation happens outside the timed regions.
+    TrialResult timeBuild(IIndex& index, IndexKind kind,
+                           const std::vector<IndexEntry>& entries,
                            InsertionOrder order, const BenchmarkConfig& config,
                            std::size_t trial) const;
-    TrialResult timeInsert(IndexKind kind, const std::vector<IndexEntry>& initial,
+    TrialResult timeInsert(IIndex& index, IndexKind kind,
+                            std::size_t initial_size,
                             const std::vector<IndexEntry>& additions,
                             InsertionOrder order, const BenchmarkConfig& config,
                             std::size_t trial) const;
-    TrialResult timeLookup(IndexKind kind, const std::vector<IndexEntry>& entries,
-                            const LookupBatch& queries, Workload workload,
-                            InsertionOrder order, const BenchmarkConfig& config,
-                            std::size_t trial) const;
+    TrialResult timeLookup(const IIndex& index, IndexKind kind,
+                            std::size_t dataset_size, const LookupBatch& queries,
+                            Workload workload, InsertionOrder order,
+                            const BenchmarkConfig& config, std::size_t trial) const;
     void verifyMappings(const IIndex& index,
                          const std::vector<IndexEntry>& entries) const;
     void verifyQueries(const IIndex& index, const LookupBatch& queries) const;

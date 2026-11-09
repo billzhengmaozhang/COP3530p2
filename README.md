@@ -54,16 +54,21 @@ sequential and shuffled order, with seed 3530. Use a Release build when
 comparing timings. For a quick check, enter **1000** at the dataset-size prompt
 and accept the other defaults.
 
-The console shows median times for build, incremental insert, successful
-lookup, and missing lookup. The CSV at **results/benchmark.csv** contains
+The suite prints progress as each dataset finishes, then median times for build,
+incremental insert, successful lookup, and missing lookup. Missing-key lookups
+use IDs interleaved with the stored keys (generated data stores odd IDs). The CSV at **results/benchmark.csv** contains
 individual measured trials. The menu also accepts a different output path
 whose parent directory already exists. The [archived benchmark results](results/README.md)
 include the raw trials used in the report.
 
 ## Run the tests
 
-Configuring with tests enabled fetches Catch2 v3.5.4 from GitHub, which requires
-Git and network access on the first configuration.
+Configuring with tests enabled uses an installed Catch2 v3 if CMake finds one;
+otherwise it fetches Catch2 v3.5.4 from GitHub, which requires Git and network
+access on the first configuration. Add `-DMINIDB_SANITIZE=ON` for
+AddressSanitizer and UndefinedBehaviorSanitizer (GCC/Clang) and
+`-DMINIDB_WERROR=ON` to treat warnings as errors. `cmake --build build --target headers`
+checks that every header compiles on its own.
 
 ~~~sh
 cmake -S . -B build-tests -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON

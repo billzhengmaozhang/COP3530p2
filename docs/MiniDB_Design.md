@@ -54,6 +54,9 @@ public:
     virtual InsertStatus insert(TradeId key, RowId row) = 0;
     virtual std::optional<RowId> find(TradeId key) const = 0;
     virtual std::size_t size() const = 0;
+    virtual bool validateStructure() const = 0;       // untimed self-check
+    virtual std::size_t bucketCount() const { return 0; }  // hash only
+    virtual std::size_t maxChildren() const { return 0; }  // B+ tree only
 };
 ```
 
@@ -170,7 +173,7 @@ All leaves must remain at the same depth. A non-root internal node has at least 
 - Every stored ID appears exactly once in each index and resolves to the correct row.
 - Invalid records and duplicate requests change neither records nor mappings.
 - Selecting an index affects lookup only. Every successful insertion updates both indexes.
-- Duplicate prechecks prevent normal rejection midway through insertion. An unexpected allocation failure or internal invariant failure is fatal: report it and exit rather than continue with possibly inconsistent state. Recoverable errors are malformed input, duplicates, missing IDs, and file I/O failures.
+- Duplicate prechecks prevent normal rejection midway through insertion. If an insertion fails part-way for an unexpected reason (for example an allocation failure), `Database::insert` rebuilds the store and both indexes from the previously committed records before rethrowing, so they never disagree. Recoverable errors are malformed input, duplicates, missing IDs, and file I/O failures.
 
 This is application-level consistency within one process; the project does not implement transaction recovery or crash durability.
 
@@ -215,7 +218,7 @@ Saving does not modify the in-memory database. Loading a saved file must reprodu
 
 Generate IDs `1` through `n`, symbols from a fixed documented list, positive integer prices and quantities, and nonnegative timestamps. Use `std::mt19937_64` with seed `3530` by default. Document the field ranges and generation procedure. A shuffled dataset contains the same records as its sequential counterpart in a different order. Identical configuration and build environment reproduce the dataset; sharing the generated CSV guarantees identical input across environments.
 
-Generate insertion-test records with IDs above the initial dataset range. Generate missing-query IDs from a disjoint range and verify they are absent. Reject configurations whose ID ranges would overflow.
+Generate insertion-test records with IDs above the initial dataset range. The benchmark datasets use an ID stride of 2 (odd IDs), and missing-query IDs are drawn from the absent IDs interleaved with stored keys, so unsuccessful lookups reach every part of a tree rather than only its rightmost path. Datasets without gaps fall back to a disjoint range above all stored and inserted IDs. Every query result is verified against its expected outcome. Reject configurations whose ID ranges would overflow.
 
 ## 10. Benchmark runner
 
@@ -229,11 +232,11 @@ Generate insertion-test records with IDs above the initial dataset range. Genera
 | Workload | Input and initial state | Timed work | Recorded result |
 |---|---|---|---|
 | Index build | Fresh empty index; `n` known `(ID, RowId)` pairs | Insert all pairs with normal resizing/splitting | Batch duration and average time per inserted entry |
-| New-record insertion | Fresh index prebuilt with `n` entries; disjoint new IDs | Insert `m=max(1,n/10)` new mappings | Batch duration and average time per insertion |
+| New-record insertion | The index built for this trial (after the lookup workloads); disjoint new IDs above all stored IDs | Insert `m=max(1,n/10)` new mappings | Batch duration and average time per insertion |
 | Successful lookup | Prebuilt index; 100,000 fixed existing-ID queries | Call `find` for each query and consume result | Batch duration, average time per query, throughput |
 | Unsuccessful lookup | Prebuilt index; 100,000 fixed absent-ID queries | Call `find` for each query and consume result | Same measures plus zero expected matches |
 
-Repeat each workload for all three dataset sizes and both insertion orders. Both implementations receive identical mappings and query sequences. The insertion benchmark measures index maintenance, not full-record parsing or database insertion into both indexes.
+Each trial builds one index per implementation, times the build, runs both lookup workloads on that index, then times the incremental inserts; structure and mappings are verified afterward, outside timing. Repeat for all three dataset sizes and both insertion orders. Both implementations receive identical mappings and query sequences. The insertion benchmark measures index maintenance, not full-record parsing or database insertion into both indexes.
 
 ### Measurement rules
 
