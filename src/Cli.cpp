@@ -61,11 +61,15 @@ void describeBuild(BenchmarkConfig& config) {
 #endif
 #ifdef NDEBUG
     config.optimization_flags = "NDEBUG defined";
+#elif defined(_MSC_VER) && !defined(_DEBUG)
+    config.optimization_flags = "NDEBUG undefined, MSVC release configuration";
 #else
     config.optimization_flags = "NDEBUG undefined";
 #endif
-#ifdef __OPTIMIZE__
+#if defined(__OPTIMIZE__)
     config.optimization_flags += ", compiler optimization enabled";
+#elif defined(_MSC_VER) && defined(NDEBUG)
+    config.optimization_flags += ", MSVC release build";
 #endif
 #if defined(_WIN32)
     config.machine_description = "Windows";
@@ -220,8 +224,11 @@ void Cli::handleBenchmark() {
     }
     const auto destination = trim(*path).empty() ? "results/benchmark.csv" : *path;
     describeBuild(config);
+#if !defined(NDEBUG) && !defined(__OPTIMIZE__)
+    output_ << "Warning: this build is not optimized; use a Release build for meaningful timings.\n";
+#endif
     output_ << "Running benchmarks...\n" << std::flush;
-    const auto report = benchmark_.runSuite(config);
+    const auto report = benchmark_.runSuite(config, &output_);
     benchmark_.saveCsv(report, destination);
     benchmark_.printSummary(report, output_);
     output_ << "Saved benchmark results to " << destination << ".\n";

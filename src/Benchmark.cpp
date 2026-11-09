@@ -32,23 +32,13 @@ namespace minidb
             return acc;
         }
 
-        void recordIndexCapacities(const IIndex& index, IndexKind kind, TrialResult& result) {
-        if (kind == IndexKind::BPlusTree) {
-            const auto& bpt = static_cast<const BPlusTreeIndex&>(index);
-            result.bucket_count = 0;
-            result.max_children = bpt.maxChildren();
-        } else {
-            const auto& hash = static_cast<const HashIndex&>(index);
-            result.bucket_count = hash.bucketCount();
-            result.max_children = 0;
+        void recordIndexCapacities(const IIndex& index, TrialResult& result) {
+            result.bucket_count = index.bucketCount();
+            result.max_children = index.maxChildren();
         }
-    }
 
-        void checkStructureOutsideTiming(const IIndex& index, IndexKind kind) {
-            bool ok = (kind == IndexKind::BPlusTree)
-                          ? static_cast<const BPlusTreeIndex&>(index).validateStructure()
-                          : static_cast<const HashIndex&>(index).validateStructure();
-            if (!ok) {
+        void checkStructureOutsideTiming(const IIndex& index) {
+            if (!index.validateStructure()) {
                 throw MiniDBError(ErrorCode::InvalidRecord, "Index structural validation failed after benchmark trial.");
             }
         }
@@ -139,44 +129,59 @@ namespace minidb
                     batch.expected.push_back( static_cast<RowId>(row) );
                 }
             } else {
-                TradeId max_id = 0;
+                std::vector<TradeId> ids;
+                ids.reserve(records.size());
                 for (const auto& r : records) {
-                    max_id = std::max(max_id, r.trade_id);
+                    ids.push_back(r.trade_id);
                 }
-                const auto additions = std::max<std::size_t>(1, records.size() / 10);
-                const auto last_id = std::numeric_limits<TradeId>::max();
-                if (additions >= last_id - max_id) {
-                    throw MiniDBError(ErrorCode::InvalidConfiguration, "Benchmark has no disjoint missing-ID range.");
-                }
-                std::uniform_int_distribution<TradeId> dist(max_id + additions + 1, last_id);
-                for (std::size_t i = 0; i < count; ++i) {
-                    batch.keys.push_back(dist(rng));
-                    batch.expected.push_back(std::nullopt);
+                std::sort(ids.begin(), ids.end());
+                const TradeId min_id = ids.front();
+                const TradeId max_id = ids.back();
+                // Prefer absent IDs interleaved with stored keys so tree lookups
+                // spread across all leaves; require enough gaps for cheap rejection sampling.
+                const TradeId gaps = (max_id - min_id + 1) - ids.size();
+                if (gaps != 0 && gaps >= ids.size() / 16 + 1) {
+                    std::uniform_int_distribution<TradeId> dist(min_id, max_id);
+                    while (batch.keys.size() < count) {
+                        const TradeId key = dist(rng);
+                        if (!std::binary_search(ids.begin(), ids.end(), key)) {
+                            batch.keys.push_back(key);
+                            batch.expected.push_back(std::nullopt);
+                        }
+                    }
+                } else {
+                    // Dense IDs: fall back to IDs above the stored and additional ranges.
+                    const auto additions = std::max<std::size_t>(1, records.size() / 10);
+                    const auto last_id = std::numeric_limits<TradeId>::max();
+                    if (additions >= last_id - max_id) {
+                        throw MiniDBError(ErrorCode::InvalidConfiguration, "Benchmark has no disjoint missing-ID range.");
+                    }
+                    std::uniform_int_distribution<TradeId> dist(max_id + additions + 1, last_id);
+                    for (std::size_t i = 0; i < count; ++i) {
+                        batch.keys.push_back(dist(rng));
+                        batch.expected.push_back(std::nullopt);
+                    }
                 }
             }
             return batch;
         }
 
         TrialResult Benchmark::timeBuild(
+            IIndex& index,
             IndexKind kind,
             const std::vector<IndexEntry>& entries,
             InsertionOrder order,
             const BenchmarkConfig& config,
             std::size_t trial) const
         {
-            auto index = makeIndex(kind, config.indexes);
             std::uint64_t checksum = 0;
 
             auto t0 = std::chrono::steady_clock::now();
             for (const auto& e : entries) {
-                InsertStatus status = index->insert(e.key, e.row);
+                InsertStatus status = index.insert(e.key, e.row);
                 checksum += (status == InsertStatus::Inserted) ? (e.row + 1ULL) : 0ULL;
             }
             auto t1 = std::chrono::steady_clock::now();
-
-            // Validate structure and mappings OUTSIDE timed region
-            checkStructureOutsideTiming(*index, kind);
-            verifyMappings(*index, entries);
 
             TrialResult result{};
             result.dataset_size = entries.size();
@@ -188,39 +193,29 @@ namespace minidb
             result.operation_count = entries.size();
             result.elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             result.checksum = checksum;
-            recordIndexCapacities(*index, kind, result);
+            recordIndexCapacities(index, result);
             return result;
         }
 
         TrialResult Benchmark::timeInsert(
+            IIndex& index,
             IndexKind kind,
-            const std::vector<IndexEntry>& initial,
+            std::size_t initial_size,
             const std::vector<IndexEntry>& additions,
             InsertionOrder order,
             const BenchmarkConfig& config,
             std::size_t trial) const
         {
-            auto index = makeIndex(kind, config.indexes);
-            // Prepopulate outside timed region (Measurement Rule 1)
-            for (const auto& e : initial) {
-                index->insert(e.key, e.row);
-            }
-
             std::uint64_t checksum = 0;
             auto t0 = std::chrono::steady_clock::now();
             for (const auto& e : additions) {
-                InsertStatus status = index->insert(e.key, e.row);
+                InsertStatus status = index.insert(e.key, e.row);
                 checksum += (status == InsertStatus::Inserted) ? (e.row + 1ULL) : 0ULL;
             }
             auto t1 = std::chrono::steady_clock::now();
 
-            // Validate outside timed region
-            checkStructureOutsideTiming(*index, kind);
-            verifyMappings(*index, initial);
-            verifyMappings(*index, additions);
-
             TrialResult result{};
-            result.dataset_size = initial.size();
+            result.dataset_size = initial_size;
             result.order = order;
             result.seed = config.seed;
             result.index = kind;
@@ -229,37 +224,33 @@ namespace minidb
             result.operation_count = additions.size();
             result.elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             result.checksum = checksum;
-            recordIndexCapacities(*index, kind, result);
+            recordIndexCapacities(index, result);
             return result;
         }
 
         TrialResult Benchmark::timeLookup(
+            const IIndex& index,
             IndexKind kind,
-            const std::vector<IndexEntry>& entries,
+            std::size_t dataset_size,
             const LookupBatch& queries,
             Workload workload,
             InsertionOrder order,
             const BenchmarkConfig& config,
             std::size_t trial) const
         {
-            auto index = makeIndex(kind, config.indexes);
-            for (const auto& e : entries) {
-                index->insert(e.key, e.row);
-            }
-
             std::uint64_t checksum = 14695981039346656037ULL;
             auto t0 = std::chrono::steady_clock::now();
             for (TradeId key : queries.keys) {
-                auto res = index->find(key);
+                auto res = index.find(key);
                 checksum = mixChecksum(checksum, res);
             }
             auto t1 = std::chrono::steady_clock::now();
 
             // Verify every single lookup matches expected outside timed region
-            verifyQueries(*index, queries);
+            verifyQueries(index, queries);
 
             TrialResult result{};
-            result.dataset_size = entries.size();
+            result.dataset_size = dataset_size;
             result.order = order;
             result.seed = config.seed;
             result.index = kind;
@@ -268,7 +259,7 @@ namespace minidb
             result.operation_count = queries.keys.size();
             result.elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             result.checksum = checksum;
-            recordIndexCapacities(*index, kind, result);
+            recordIndexCapacities(index, result);
             return result;
         }
 
@@ -325,49 +316,60 @@ namespace minidb
 
             std::size_t total_trials = config.warmup_trials + config.measured_trials;
 
-            auto run_pair = [&](std::size_t t, auto&& fn) {
-                // Measurement Rule 3: Alternate which implementation runs first between trials
-                IndexKind first  = (t % 2 == 0) ? IndexKind::Hash : IndexKind::BPlusTree;
-                IndexKind second = (t % 2 == 0) ? IndexKind::BPlusTree : IndexKind::Hash;
+            // Slots keep the CSV order build, insert, find_existing, find_missing.
+            enum Slot { kBuild, kInsert, kExisting, kMissing, kSlots };
+            for (std::size_t t = 0; t < total_trials; ++t) {
+                // Measurement Rule 3: alternate which implementation runs first between trials
+                const IndexKind order_of_kinds[2] = {
+                    (t % 2 == 0) ? IndexKind::Hash : IndexKind::BPlusTree,
+                    (t % 2 == 0) ? IndexKind::BPlusTree : IndexKind::Hash};
+                TrialResult results[2][kSlots]; // [0] hash, [1] B+ tree
+                const std::size_t measured_idx = (t >= config.warmup_trials) ? t - config.warmup_trials + 1 : 0;
 
-                TrialResult r1 = fn(first);
-                TrialResult r2 = fn(second);
-                if (r1.checksum != r2.checksum) {
-                    throw MiniDBError(ErrorCode::InvalidRecord, "Hash and B+ Tree checksums diverged!");
+                for (IndexKind kind : order_of_kinds) {
+                    auto index = makeIndex(kind, config.indexes);
+                    auto& r = results[kind == IndexKind::Hash ? 0 : 1];
+                    // Build once, run both lookup workloads on that index, then time
+                    // the incremental inserts (which mutate it); verify at the end.
+                    r[kBuild] = timeBuild(*index, kind, entries, order, config, measured_idx);
+                    r[kExisting] = timeLookup(*index, kind, entries.size(), existing_queries,
+                                              Workload::FindExisting, order, config, measured_idx);
+                    r[kMissing] = timeLookup(*index, kind, entries.size(), missing_queries,
+                                             Workload::FindMissing, order, config, measured_idx);
+                    r[kInsert] = timeInsert(*index, kind, entries.size(), additions, order, config, measured_idx);
+
+                    checkStructureOutsideTiming(*index);
+                    verifyMappings(*index, entries);
+                    verifyMappings(*index, additions);
                 }
-                if (t >= config.warmup_trials) {
-                    std::size_t measured_idx = t - config.warmup_trials + 1;
-                    r1.trial = measured_idx;
-                    r2.trial = measured_idx;
-                    // Store in consistent order (Hash then BPlusTree)
-                    if (first == IndexKind::Hash) {
-                        report.trials.push_back(r1);
-                        report.trials.push_back(r2);
-                    } else {
-                        report.trials.push_back(r2);
-                        report.trials.push_back(r1);
+
+                for (int slot = 0; slot < kSlots; ++slot) {
+                    if (results[0][slot].checksum != results[1][slot].checksum) {
+                        throw MiniDBError(ErrorCode::InvalidRecord, "Hash and B+ Tree checksums diverged!");
+                    }
+                    if (t >= config.warmup_trials) {
+                        report.trials.push_back(results[0][slot]);
+                        report.trials.push_back(results[1][slot]);
                     }
                 }
-            };
-
-            for (std::size_t t = 0; t < total_trials; ++t) {
-                run_pair(t, [&](IndexKind k) { return timeBuild(k, entries, order, config, t); });
-                run_pair(t, [&](IndexKind k) { return timeInsert(k, entries, additions, order, config, t); });
-                run_pair(t, [&](IndexKind k) { return timeLookup(k, entries, existing_queries, Workload::FindExisting, order, config, t); });
-                run_pair(t, [&](IndexKind k) { return timeLookup(k, entries, missing_queries, Workload::FindMissing, order, config, t); });
             }
 
             return report;
         }
 
-        BenchmarkReport Benchmark::runSuite(const BenchmarkConfig& config) const {
+        BenchmarkReport Benchmark::runSuite(const BenchmarkConfig& config, std::ostream* progress) const {
             BenchmarkReport full_report{config, {}};
             for (std::size_t n : config.dataset_sizes) {
                 for (InsertionOrder order : config.orders) {
-                    DatasetConfig ds_cfg{n, config.seed, order, 1};
+                    // Stride 2 stores odd IDs only, leaving absent IDs between stored keys.
+                    DatasetConfig ds_cfg{n, config.seed, order, 1, 2};
                     auto records = DatasetGenerator::generate(ds_cfg);
                     auto sub = run(records, order, config);
                     full_report.trials.insert(full_report.trials.end(), sub.trials.begin(), sub.trials.end());
+                    if (progress) {
+                        *progress << "  finished " << n << " records, " << orderName(order) << " order\n"
+                                  << std::flush;
+                    }
                 }
             }
             return full_report;
@@ -389,9 +391,9 @@ namespace minidb
                 const double elapsed = median(times);
                 summary << size << "  " << orderName(order) << "  " << indexName(index)
                         << "  " << workloadName(workload) << "  " << elapsed / 1e6
-                        << "  " << elapsed / operations << "  ";
+                        << "  " << elapsed / static_cast<double>(operations) << "  ";
                 if (elapsed > 0) {
-                    summary << operations * 1e9 / elapsed;
+                    summary << static_cast<double>(operations) * 1e9 / elapsed;
                 } else {
                     summary << "n/a";
                 }

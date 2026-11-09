@@ -5,6 +5,7 @@
 #include "minidb/HashIndex.h"
 #include "minidb/RecordStore.h"
 #include "minidb/RecordValidator.h"
+#include <stdexcept>
 
 namespace minidb {
 struct Database::State {
@@ -36,7 +37,20 @@ Database::Database(const IndexConfig& config)
 Database::~Database() = default;
 
 InsertStatus Database::insert(const TradeRecord& record) {
-    return state_->insert(record);
+    const auto committed = state_->store.size();
+    try {
+        return state_->insert(record);
+    } catch (...) {
+        // Validation errors are thrown before anything is stored. Any other
+        // failure (for example bad_alloc) may leave the new row in the store
+        // and in only some indexes, so restore the committed prefix.
+        if (state_->store.size() != committed) {
+            auto rows = state_->store.records();
+            rows.erase(rows.begin() + static_cast<std::ptrdiff_t>(committed), rows.end());
+            state_ = buildState(rows);
+        }
+        throw;
+    }
 }
 
 std::optional<TradeRecord> Database::find(TradeId id, IndexKind index) const {

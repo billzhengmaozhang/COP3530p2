@@ -19,7 +19,7 @@ InsertStatus HashIndex::insert(TradeId key, RowId row) {
         return InsertStatus::DuplicateKey;
     }
     auto capacity = buckets_.size();
-    while (static_cast<double>(size_ + 1) / capacity > max_load_factor_) {
+    while (static_cast<double>(size_ + 1) / static_cast<double>(capacity) > max_load_factor_) {
         if (capacity > buckets_.max_size() / 2) {
             throw std::length_error("Hash index capacity exceeded.");
         }
@@ -51,7 +51,7 @@ std::size_t HashIndex::bucketCount() const {
 }
 
 double HashIndex::loadFactor() const {
-    return static_cast<double>(size_) / bucketCount();
+    return static_cast<double>(size_) / static_cast<double>(bucketCount());
 }
 
 bool HashIndex::validateStructure() const {

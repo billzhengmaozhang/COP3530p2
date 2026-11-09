@@ -8,8 +8,8 @@
 
 namespace minidb {
 std::vector<TradeRecord> DatasetGenerator::generate(const DatasetConfig& config) {
-    if (config.first_id == 0 || (config.count != 0 &&
-        config.count - 1 > std::numeric_limits<TradeId>::max() - config.first_id)) {
+    if (config.first_id == 0 || config.id_stride == 0 || (config.count != 0 &&
+        config.count - 1 > (std::numeric_limits<TradeId>::max() - config.first_id) / config.id_stride)) {
         throw MiniDBError(ErrorCode::InvalidConfiguration, "Dataset trade IDs are out of range.");
     }
     if (config.order != InsertionOrder::Sequential && config.order != InsertionOrder::Shuffled) {
@@ -29,7 +29,7 @@ std::vector<TradeRecord> DatasetGenerator::generate(const DatasetConfig& config)
     std::vector<TradeRecord> records;
     records.reserve(config.count);
     for (std::size_t i = 0; i < config.count; ++i) {
-        records.push_back({config.first_id + i, symbols[symbol(rng)],
+        records.push_back({config.first_id + i * config.id_stride, symbols[symbol(rng)],
                            price(rng), quantity(rng), timestamp(rng)});
     }
     if (config.order == InsertionOrder::Shuffled) {

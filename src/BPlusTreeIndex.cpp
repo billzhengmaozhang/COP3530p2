@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <iterator>
 
-// Implement leaf lookup, sorted insertion, leaf/internal splits, and root growth.
-
 namespace minidb
 {
     BPlusTreeIndex::BPlusTreeIndex(std::size_t max_children)
@@ -143,23 +141,23 @@ namespace minidb
     }
 
     BPlusTreeIndex::SplitResult BPlusTreeIndex::splitLeaf(Node& leaf) {
-    auto right = std::make_unique<Node>(Node{true, {}, {}, {}, nullptr});
-    std::size_t mid = leaf.keys.size() / 2; // For M entries, left gets M/2, right gets M - M/2
+        auto right = std::make_unique<Node>(Node{true, {}, {}, {}, nullptr});
+        std::size_t mid = leaf.keys.size() / 2; // For M entries, left gets M/2, right gets M - M/2
 
-    right->keys.assign(leaf.keys.begin() + static_cast<std::ptrdiff_t>(mid), leaf.keys.end());
-    right->rows.assign(leaf.rows.begin() + static_cast<std::ptrdiff_t>(mid), leaf.rows.end());
+        right->keys.assign(leaf.keys.begin() + static_cast<std::ptrdiff_t>(mid), leaf.keys.end());
+        right->rows.assign(leaf.rows.begin() + static_cast<std::ptrdiff_t>(mid), leaf.rows.end());
 
-    leaf.keys.resize(mid);
-    leaf.rows.resize(mid);
+        leaf.keys.resize(mid);
+        leaf.rows.resize(mid);
 
-    // Update linked-leaf pointers
-    right->next = leaf.next;
-    leaf.next = right.get();
+        // Update linked-leaf pointers
+        right->next = leaf.next;
+        leaf.next = right.get();
 
-    // Copy right leaf's smallest key into parent as separator
-    TradeId separator = right->keys.front();
-    return SplitResult{separator, std::move(right)};
-}
+        // Copy right leaf's smallest key into parent as separator
+        TradeId separator = right->keys.front();
+        return SplitResult{separator, std::move(right)};
+    }
 
     BPlusTreeIndex::SplitResult BPlusTreeIndex::splitInternal(Node& node) {
         auto right = std::make_unique<Node>(Node{false, {}, {}, {}, nullptr});

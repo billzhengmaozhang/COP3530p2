@@ -46,7 +46,9 @@ struct BenchmarkReport {
 class Benchmark {
 public:
     // Generates required datasets; warmups excluded from returned results.
-    BenchmarkReport runSuite(const BenchmarkConfig& config) const;
+    // If progress is non-null, a line is written after each dataset finishes.
+    BenchmarkReport runSuite(const BenchmarkConfig& config,
+                             std::ostream* progress = nullptr) const;
     // Uses supplied records without modifying the active Database.
     BenchmarkReport run(const std::vector<TradeRecord>& records,
                          InsertionOrder order,
@@ -69,18 +71,22 @@ private:
     LookupBatch makeQueries(const std::vector<TradeRecord>& records,
                             std::size_t count, std::uint64_t seed,
                             bool successful) const;
-    // Each trial constructs fresh indexes and validates outside timed regions.
-    TrialResult timeBuild(IndexKind kind, const std::vector<IndexEntry>& entries,
+    // One trial per index: build (timed), then both lookup workloads on that
+    // index, then the incremental inserts (timed, mutates the index). All
+    // validation happens outside the timed regions.
+    TrialResult timeBuild(IIndex& index, IndexKind kind,
+                           const std::vector<IndexEntry>& entries,
                            InsertionOrder order, const BenchmarkConfig& config,
                            std::size_t trial) const;
-    TrialResult timeInsert(IndexKind kind, const std::vector<IndexEntry>& initial,
+    TrialResult timeInsert(IIndex& index, IndexKind kind,
+                            std::size_t initial_size,
                             const std::vector<IndexEntry>& additions,
                             InsertionOrder order, const BenchmarkConfig& config,
                             std::size_t trial) const;
-    TrialResult timeLookup(IndexKind kind, const std::vector<IndexEntry>& entries,
-                            const LookupBatch& queries, Workload workload,
-                            InsertionOrder order, const BenchmarkConfig& config,
-                            std::size_t trial) const;
+    TrialResult timeLookup(const IIndex& index, IndexKind kind,
+                            std::size_t dataset_size, const LookupBatch& queries,
+                            Workload workload, InsertionOrder order,
+                            const BenchmarkConfig& config, std::size_t trial) const;
     void verifyMappings(const IIndex& index,
                          const std::vector<IndexEntry>& entries) const;
     void verifyQueries(const IIndex& index, const LookupBatch& queries) const;

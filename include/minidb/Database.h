@@ -13,7 +13,10 @@ public:
     Database(const Database&) = delete;
     Database& operator=(const Database&) = delete;
 
-    // Invalid records throw MiniDBError; duplicates return DuplicateKey.
+    // Invalid records throw MiniDBError; duplicates return DuplicateKey. If an
+    // insert fails part-way (e.g. out of memory) the database is rebuilt from
+    // the previously committed records, so the store and indexes never disagree.
+    // Not thread-safe.
     InsertStatus insert(const TradeRecord& record);
     // Queries the chosen index and returns a copy of the complete record.
     std::optional<TradeRecord> find(TradeId id, IndexKind index) const;

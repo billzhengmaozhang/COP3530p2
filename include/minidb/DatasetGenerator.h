@@ -9,6 +9,7 @@ struct DatasetConfig {
     std::uint64_t seed = 3530;
     InsertionOrder order = InsertionOrder::Sequential;
     TradeId first_id = 1; // Use a disjoint range for additional insertion records.
+    TradeId id_stride = 1; // Gap between consecutive IDs; 2 leaves absent IDs between stored keys.
 };
 
 class DatasetGenerator {

@@ -59,6 +59,9 @@ CsvData CsvIO::read(const std::string& path) {
     std::size_t line_number = 0;
     while (std::getline(input, line)) {
         ++line_number;
+        if (line_number == 1 && line.compare(0, 3, "\xEF\xBB\xBF") == 0) {
+            line.erase(0, 3); // UTF-8 byte order mark written by some spreadsheet exports
+        }
         if (line.find_first_not_of(whitespace) == std::string::npos) {
             continue;
         }

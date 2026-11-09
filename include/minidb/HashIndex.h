@@ -10,10 +10,10 @@ public:
     InsertStatus insert(TradeId key, RowId row) override;
     std::optional<RowId> find(TradeId key) const override;
     std::size_t size() const override;
+    bool validateStructure() const override;
+    std::size_t bucketCount() const override;
 
-    std::size_t bucketCount() const;
     double loadFactor() const;
-    bool validateStructure() const;
 
 private:
     static std::uint64_t hashKey(TradeId key);
